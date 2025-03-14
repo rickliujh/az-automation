@@ -35,6 +35,8 @@ import time
 import subprocess
 from datetime import date
 
+import unittest
+
 FILE="schedulebook.csv"
 NUM2DAY = {
     1:"M",
@@ -45,19 +47,41 @@ NUM2DAY = {
     6:"S",
     7:"U",
 }
-REX = "^([MTWRFSU]\d{10}-\d{10})(,([MTWRFSU]\d{10}-\d{10}))*$"
+REX = r"^([MTWRFSU]\d{10}-\d{10})(,([MTWRFSU]\d{10}-\d{10}))*$"
 
-def today(period):
+def today(period, day):
     if not re.match(REX, period):
         raise ValueError("invalid formart for running period")
         
-    groups = period.spliti(',')
-    day = NUM2DAY[date.today().weekday()]
-    for g in groups:
-        if g[0] == day:
-            return g
-    return None
+    groups = period.split(',')
     
+    for g in groups:
+        print(g)
+        if g[0] == NUM2DAY[day]:
+            tsa = g[1:].split('-')
+            return (tsa[0], tsa[1])
+    return None
+
+class TestScheduler(unittest.TestCase):
+    def test_should_return_timestamps(self):
+        period1 = "M1741796390-1741803820"
+        period2 = "M1741796390-1741803820,T1741796391-1741803819"
+        day = 1
+        self.assertEqual(today(period1, day), ("1741796390","1741803820"))
+        self.assertEqual(today(period2, day), ("1741796390","1741803820"))
+
+    def test_should_raise_ValueError(self):
+        period1 = "M1741796390,1741803820,T1741796391-1741803819"
+        period2 = "Y1741796390-1741803820,T1741796391-1741803819"
+        period3 = "Y1741796390-1741803820,T17417963-1741803819"
+        day = 1
+        with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
+           today(period1, day) 
+        with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
+           today(period2, day) 
+        with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
+           today(period3, day) 
+            
 
 def main():
     try:
@@ -73,12 +97,12 @@ def main():
                 cmd1 = row['3']
                 print(f"reading row: {id} {period} {cmd0} {cmd1}")
 
-                timestamps = today(period)
+                timestamps = today(period, date.today().weekday())
                 if timestamps is None:
-                    subprocess.Popen(cmd1, shell=True)        
+                    subprocess.Popen(cmd0, shell=True)        
+                    continue
 
-                startedAt = timestamps[0].strip()
-                endedAt = timestamps[1].strip()
+                startedAt, endedAt = timestamps
                 if now > endedAt:
                     subprocess.Popen(cmd1, shell=True)        
                 else:
