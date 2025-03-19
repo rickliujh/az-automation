@@ -2,8 +2,8 @@
 
 """
 This script acts as a simple scheduler that automatically executes the command 
-listed in the file. This script DO NOT guarantee the single execution of the command.
-The idempotent of the execution should be handled by command it invokes
+listed in the file. This script DO NOT guarantee the single execution of the 
+command. The idempotent of the execution should be handled by command it invokes
 
 CSV table will look like this
 id    |          period          |         cmd0                |           cmd1
@@ -52,7 +52,7 @@ NUM2DAY = {
 REX = r"^([MTWRFSU]\d\d:\d\d-\d\d:\d\d)(,([MTWRFSU]\d\d:\d\d-\d\d:\d\d))*$"
 NOW = datetime.now()
 
-def today(period, day):
+def getPeriod(period, day):
     if not re.match(REX, period):
         raise ValueError("invalid formart for running period")
         
@@ -81,16 +81,16 @@ def main():
                 period = row[1]
                 cmd0 = row[2]
                 cmd1 = row[3]
-                print(f"scan[{id}]: period:{period}, cmd0:{cmd0}, cmd1:{cmd1}")
+                print(f"scanning [{id}]: period:{period}, cmd0:{cmd0}, cmd1:{cmd1}")
 
-                dates = today(period, date.today().weekday())
+                p = getPeriod(period, date.today().weekday())
                 action = cmd1
-                if dates is not None:
-                    startedAt, endedAt = dates
+                if p is not None:
+                    startedAt, endedAt = p
                     if NOW >= startedAt and NOW < endedAt:
                         action = cmd0
 
-                print(f"action[{id}]: {action}")
+                print(f"action to be taken [{id}]: {action}")
                 subprocess.Popen(action, shell=True)        
 
             print(f"scan finished")
@@ -103,14 +103,14 @@ class TestScheduler(unittest.TestCase):
         period2 = "M07:00-16:00,T09:00-18:00"
         day = 1
         self.assertEqual(
-            today(period1, day), 
+            getPeriod(period1, day), 
             (
                 datetime.combine(NOW.date(), time(hour=7,minute=0)),
                 datetime.combine(NOW.date(), time(hour=16,minute=0)),
             )
         )
         self.assertEqual(
-            today(period1, day), 
+            getPeriod(period1, day), 
             (
                 datetime.combine(NOW.date(), time(hour=7,minute=0)),
                 datetime.combine(NOW.date(), time(hour=16,minute=0)),
@@ -123,11 +123,11 @@ class TestScheduler(unittest.TestCase):
         period3 = "M07:00,16:00,T9:00-18:00"
         day = 1
         with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
-           today(period1, day) 
+           getPeriod(period1, day) 
         with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
-           today(period2, day) 
+           getPeriod(period2, day) 
         with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
-           today(period3, day) 
+           getPeriod(period3, day) 
 
 
 if __name__ == "__main__":
