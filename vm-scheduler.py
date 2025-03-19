@@ -2,12 +2,13 @@
 
 """
 This script acts as a simple scheduler that automatically executes the command 
-listed in the file.
+listed in the file. This script DO NOT guarantee the single execution of the command.
+The idempotent of the execution should be handled by command it invokes
 
-CSV file format:
-0     |           1             |           2                 |            3
-id    |         period          |         cmd0                |           cmd1
-0     | M1741796390-1741803820,T1741796390-1741803820 | az aks start -r example ... | az aks stop -r example ...
+CSV table will look like this
+id    |          period          |         cmd0                |           cmd1
+------|--------------------------|-----------------------------|--------------------------
+0     | M07:00-16:00,T09:00-18:00 | az aks start -r example ... | az aks stop -r example ...
 
 [Column 0] id for identity the task, only for operator to identify the task, the 
 scheduler will not use this value.
@@ -21,8 +22,8 @@ resources that is outside of period.
         group can be repeated by using "," as delimiter.
         day: M as Monday, T as Tuesday, W as Wednesday, R as Thursday, F as 
                 Friday, S as Saturday, U as Sunday
-        startedAt: unix timestamp
-        endedAt: unix timestamp
+        startedAt: HH:MM
+        endedAt: HH:MM
 
 [Column 2] cmd0 is the shell command for activate the resource
 
@@ -30,14 +31,15 @@ resources that is outside of period.
 """
 
 import re
+import sys
 import csv
-import time
+import time as t
 import subprocess
-from datetime import date
+from datetime import datetime, time, date
 
 import unittest
 
-FILE="schedulebook.csv"
+FILE= sys.argv[1]
 NUM2DAY = {
     1:"M",
     2:"T",
@@ -47,33 +49,78 @@ NUM2DAY = {
     6:"S",
     7:"U",
 }
-REX = r"^([MTWRFSU]\d{10}-\d{10})(,([MTWRFSU]\d{10}-\d{10}))*$"
+REX = r"^([MTWRFSU]\d\d:\d\d-\d\d:\d\d)(,([MTWRFSU]\d\d:\d\d-\d\d:\d\d))*$"
+NOW = datetime.now()
 
 def today(period, day):
     if not re.match(REX, period):
         raise ValueError("invalid formart for running period")
         
     groups = period.split(',')
-    
     for g in groups:
-        print(g)
         if g[0] == NUM2DAY[day]:
-            tsa = g[1:].split('-')
-            return (tsa[0], tsa[1])
+            timestrs = g[1:].split('-')
+
+            sh, sm= map(int, timestrs[0].split(':'))
+            start = datetime.combine(NOW.date(), time(hour=int(sh),minute=int(sm)))
+
+            eh, em= map(int, timestrs[1].split(':'))
+            end = datetime.combine(NOW.date(), time(hour=int(eh),minute=int(em)))
+
+            return (start, end)
     return None
+
+def main():
+    try:
+        print(f"starting scan at {NOW}")
+
+        with open(FILE) as csvfile:
+            reader = csv.reader(csvfile, delimiter=',', quotechar='"')
+            for row in reader:
+                id = row[0]
+                period = row[1]
+                cmd0 = row[2]
+                cmd1 = row[3]
+                print(f"scan[{id}]: period:{period}, cmd0:{cmd0}, cmd1:{cmd1}")
+
+                dates = today(period, date.today().weekday())
+                action = cmd1
+                if dates is not None:
+                    startedAt, endedAt = dates
+                    if NOW >= startedAt and NOW < endedAt:
+                        action = cmd0
+
+                print(f"action[{id}]: {action}")
+                subprocess.Popen(action, shell=True)        
+
+            print(f"scan finished")
+    except ValueError as e:
+        print(e)
 
 class TestScheduler(unittest.TestCase):
     def test_should_return_timestamps(self):
-        period1 = "M1741796390-1741803820"
-        period2 = "M1741796390-1741803820,T1741796391-1741803819"
+        period1 = "M07:00-16:00"
+        period2 = "M07:00-16:00,T09:00-18:00"
         day = 1
-        self.assertEqual(today(period1, day), ("1741796390","1741803820"))
-        self.assertEqual(today(period2, day), ("1741796390","1741803820"))
+        self.assertEqual(
+            today(period1, day), 
+            (
+                datetime.combine(NOW.date(), time(hour=7,minute=0)),
+                datetime.combine(NOW.date(), time(hour=16,minute=0)),
+            )
+        )
+        self.assertEqual(
+            today(period1, day), 
+            (
+                datetime.combine(NOW.date(), time(hour=7,minute=0)),
+                datetime.combine(NOW.date(), time(hour=16,minute=0)),
+            )
+        )
 
     def test_should_raise_ValueError(self):
-        period1 = "M1741796390,1741803820,T1741796391-1741803819"
-        period2 = "Y1741796390-1741803820,T1741796391-1741803819"
-        period3 = "Y1741796390-1741803820,T17417963-1741803819"
+        period1 = "M07:00,16:00,T09:00-18:00"
+        period2 = "Y07:00,16:00,T09:00-18:00"
+        period3 = "M07:00,16:00,T9:00-18:00"
         day = 1
         with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
            today(period1, day) 
@@ -81,36 +128,7 @@ class TestScheduler(unittest.TestCase):
            today(period2, day) 
         with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
            today(period3, day) 
-            
 
-def main():
-    try:
-        now = time.time()
-        print(f"starting scan at {now}")
-
-        with open(FILE, mode='r', newline='') as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                id = row['0']
-                period = row['1']
-                cmd0 = row['2']
-                cmd1 = row['3']
-                print(f"reading row: {id} {period} {cmd0} {cmd1}")
-
-                timestamps = today(period, date.today().weekday())
-                if timestamps is None:
-                    subprocess.Popen(cmd0, shell=True)        
-                    continue
-
-                startedAt, endedAt = timestamps
-                if now > endedAt:
-                    subprocess.Popen(cmd1, shell=True)        
-                else:
-                    subprocess.Popen(cmd0, shell=True)        
-
-        print(f"scan finished")
-    except e:
-        print(e)
 
 if __name__ == "__main__":
     main()
