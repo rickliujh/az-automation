@@ -70,30 +70,33 @@ def getPeriod(period, day):
             return (start, end)
     return None
 
+def decide(now, period, cmd0, cmd1):
+    action = cmd1
+    if period is not None:
+        startedAt, endedAt = period
+        if now >= startedAt and now < endedAt:
+            action = cmd0
+    return action
+
 def main():
     try:
-        print(f"starting scan at {NOW}")
+        print(f"scan start at {NOW}")
 
         with open(FILE) as csvfile:
             reader = csv.reader(csvfile, delimiter=',', quotechar='"')
             for row in reader:
                 id = row[0]
-                period = row[1]
+                periodstr = row[1]
                 cmd0 = row[2]
                 cmd1 = row[3]
-                print(f"scanning [{id}]: period:{period}, cmd0:{cmd0}, cmd1:{cmd1}")
 
-                p = getPeriod(period, date.today().weekday())
-                action = cmd1
-                if p is not None:
-                    startedAt, endedAt = p
-                    if NOW >= startedAt and NOW < endedAt:
-                        action = cmd0
-
+                print(f"scanning [{id}]: period:{periodstr}, cmd0:{cmd0}, cmd1:{cmd1}")
+                period = getPeriod(periodstr, NOW.weekday())
+                action = decide(NOW, period, cmd0, cmd1)
                 print(f"action to be taken [{id}]: {action}")
                 subprocess.Popen(action, shell=True)        
 
-            print(f"scan finished")
+            print(f"scan finished at {datetime.now()}")
     except ValueError as e:
         print(e)
 
@@ -128,6 +131,26 @@ class TestScheduler(unittest.TestCase):
            getPeriod(period2, day) 
         with self.assertRaisesRegex(ValueError, "invalid formart for running period"):
            getPeriod(period3, day) 
+
+    def test_should_return_timestamps(self):
+        action1 = "action 1"
+        action2 = "action 2"
+
+        tests = [
+            (datetime(2025, 3, 19, 20, 1, 9, 342380), [[7,0],[16,0]], action2),
+            (datetime(2025, 3, 19, 6, 49, 9, 342380), [[7,0],[16,0]], action2),
+            (datetime(2025, 3, 19, 12, 53, 7, 000000), [[7,0],[16,0]], action1),
+            (datetime(2025, 3, 19, 16, 51, 7, 000000), [[7,0],[16,52]], action1),
+            (datetime(2025, 3, 19, 16, 52, 59, 000000), [[7,0],[16,53]], action1),
+            (datetime(2025, 3, 19, 16, 53, 7, 000000), [[7,0],[16,53]], action2),
+            (datetime(2025, 3, 19, 16, 53, 7, 000000), [[7,0],[16,53]], action2),
+        ]
+
+        for t in tests:
+            date, p, expect = t
+            print(f"case: {date} {p[0][0]}:{p[0][1]}-{p[1][0]}:{p[1][1]}, expect: {expect}")
+            period = [datetime.combine(date, time(hour=p[0][0],minute=p[0][1])), datetime.combine(date,time(hour=p[1][0],minute=p[1][1])),]
+            self.assertEqual(decide(date, period, action1, action2), expect)
 
 
 if __name__ == "__main__":
